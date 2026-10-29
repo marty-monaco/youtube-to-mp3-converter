@@ -1,5 +1,6 @@
 import os
 import glob
+import re
 import tempfile
 import streamlit as st
 import yt_dlp
@@ -7,9 +8,9 @@ import yt_dlp
 st.set_page_config(page_title="YouTube to MP3", page_icon="🎵", layout="centered")
 
 st.title("🎵 YouTube to MP3 Converter")
-st.write("Extract audio tracks with embedded ID3 metadata, cover art, and live progress.")
+st.write("Extract audio tracks with embedded ID3 metadata and cover art.")
 
-url = st.text_input("YouTube URL:", placeholder="https://www.youtube.com/watch?v=...")
+raw_url = st.text_input("YouTube URL:", placeholder="https://www.youtube.com/watch?v=...")
 bitrate = st.selectbox(
     "Target Audio Bitrate:",
     options=["128", "192", "256", "320"],
@@ -21,18 +22,15 @@ if "converted_file" not in st.session_state:
 if "download_name" not in st.session_state:
     st.session_state.download_name = ""
 
-# Streamlit UI elements for live feedback
 status_box = st.empty()
 progress_bar = st.empty()
-log_expander = st.expander("Show detailed download logs", expanded=False)
+log_expander = st.expander("Show detailed logs", expanded=False)
 log_area = log_expander.empty()
 log_messages = []
 
 class StreamlitLogger:
-    """Captures yt-dlp internal messages and streams them to the UI."""
     def debug(self, msg):
-        if not msg.startswith('[debug]'):
-            self._log(msg)
+        pass
 
     def info(self, msg):
         self._log(msg)
@@ -45,30 +43,35 @@ class StreamlitLogger:
 
     def _log(self, msg):
         log_messages.append(msg)
-        # Keep recent logs visible
-        log_area.text("\n".join(log_messages[-15:]))
+        log_area.text("\n".join(log_messages[-12:]))
 
 def progress_hook(d):
-    """Updates progress bar and status text live from yt-dlp callbacks."""
     if d['status'] == 'downloading':
         total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
         downloaded = d.get('downloaded_bytes', 0)
-        
         if total > 0:
             fraction = min(downloaded / total, 1.0)
-            percent_str = f"{fraction * 100:.1f}%"
             progress_bar.progress(fraction)
-            status_box.info(f"Downloading stream: {percent_str} at {d.get('_speed_str', 'N/A')}")
+            status_box.info(f"Downloading stream: {fraction * 100:.1f}% ({d.get('_speed_str', '')})")
         else:
-            status_box.info(f"Downloading stream: {d.get('_downloaded_bytes_str', '...')} (calculating size)")
-            
+            status_box.info(f"Downloading: {d.get('_downloaded_bytes_str', '...')} received")
     elif d['status'] == 'finished':
         progress_bar.progress(1.0)
         status_box.info("Download complete. Transcoding to MP3 & embedding cover art...")
 
+def clean_youtube_url(url: str) -> str:
+    """Strips playlist, radio mix, and tracking parameters that cause 404s."""
+    url = url.strip()
+    match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', url)
+    if match:
+        return f"https://www.youtube.com/watch?v={match.group(1)}"
+    return url
+
 def process_youtube_audio(video_url: str, quality: str):
     temp_dir = tempfile.mkdtemp()
     out_template = os.path.join(temp_dir, "%(title)s.%(ext)s")
+    
+    clean_url = clean_youtube_url(video_url)
     
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -91,11 +94,10 @@ def process_youtube_audio(video_url: str, quality: str):
                 'already_have_thumbnail': False,
             },
         ],
-        # YouTube datacenter IP anti-bot workarounds
+        # TV and MWEB clients bypass datacenter IP restrictions
         'extractor_args': {
             'youtube': {
-                'player_client': ['android', 'ios', 'web'],
-                'skip': ['translated_subs']
+                'player_client': ['tv', 'mweb', 'web'],
             }
         },
         'socket_timeout': 30,
@@ -104,17 +106,17 @@ def process_youtube_audio(video_url: str, quality: str):
     }
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(video_url, download=True)
+        info = ydl.extract_info(clean_url, download=True)
         title = info.get('title', 'audio')
         
     mp3_files = glob.glob(os.path.join(temp_dir, "*.mp3"))
     if not mp3_files:
-        raise RuntimeError("No MP3 file was found. Check the detailed log above.")
+        raise RuntimeError("No MP3 file was created. Check the log details above.")
     
     return mp3_files[0], f"{title}.mp3"
 
 if st.button("Convert to MP3", type="primary"):
-    if not url.strip():
+    if not raw_url.strip():
         st.warning("Please provide a valid YouTube URL.")
     else:
         log_messages.clear()
@@ -122,7 +124,7 @@ if st.button("Convert to MP3", type="primary"):
         status_box.info("Connecting to YouTube...")
         
         try:
-            file_path, display_name = process_youtube_audio(url.strip(), bitrate)
+            file_path, display_name = process_youtube_audio(raw_url, bitrate)
             
             with open(file_path, "rb") as f:
                 st.session_state.converted_file = f.read()
