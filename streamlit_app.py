@@ -54,15 +54,14 @@ def progress_hook(d):
             progress_bar.progress(fraction)
             status_box.info(f"Downloading stream: {fraction * 100:.1f}% ({d.get('_speed_str', '')})")
         else:
-            status_box.info(f"Downloading: {d.get('_downloaded_bytes_str', '...')} received")
+            status_box.info(f"Downloading stream: {d.get('_downloaded_bytes_str', '...')} received")
     elif d['status'] == 'finished':
         progress_bar.progress(1.0)
         status_box.info("Download complete. Transcoding to MP3 & embedding cover art...")
 
 def clean_youtube_url(url: str) -> str:
-    """Strips playlist, radio mix, and tracking parameters that cause 404s."""
     url = url.strip()
-    match = re.search(r'(?:v=|\/)([0-9A-Za-z_-]{11})', url)
+    match = re.search(r'(?:v=|\/|youtu\.be\/)([0-9A-Za-z_-]{11})', url)
     if match:
         return f"https://www.youtube.com/watch?v={match.group(1)}"
     return url
@@ -94,14 +93,19 @@ def process_youtube_audio(video_url: str, quality: str):
                 'already_have_thumbnail': False,
             },
         ],
-        # TV and MWEB clients bypass datacenter IP restrictions
+        # Standard desktop browser user agent and headers
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        },
+        # Use web_embedded and mweb as fallbacks if default client triggers unplayable response
         'extractor_args': {
             'youtube': {
-                'player_client': ['tv', 'mweb', 'web'],
+                'player_client': ['web_embedded', 'mweb', 'android'],
             }
         },
         'socket_timeout': 30,
-        'retries': 3,
+        'retries': 5,
         'no_warnings': False,
     }
     
