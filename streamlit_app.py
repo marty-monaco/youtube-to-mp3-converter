@@ -203,52 +203,47 @@ def clean_youtube_url(url: str) -> str:
     return url
 
 
-def process_youtube_audio(video_url: str, quality: str, progress_hook, logger):
+def process_youtube_audio(video_url: str, quality: str):
     temp_dir = tempfile.mkdtemp()
     out_template = os.path.join(temp_dir, "%(title)s.%(ext)s")
     clean_url = clean_youtube_url(video_url)
 
     ydl_opts = {
-        "format": "bestaudio/best",
-        "outtmpl": out_template,
-        "writethumbnail": True,
-        "progress_hooks": [progress_hook],
-        "logger": logger,
-        "postprocessors": [
+        'format': 'bestaudio/best',
+        'outtmpl': out_template,
+        'writethumbnail': True,
+        'progress_hooks': [progress_hook],
+        'logger': StreamlitLogger(),
+        'postprocessors': [
             {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": quality,
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': quality,
             },
             {
-                "key": "FFmpegMetadata",
-                "add_metadata": True,
+                'key': 'FFmpegMetadata',
+                'add_metadata': True,
             },
             {
-                "key": "EmbedThumbnail",
-                "already_have_thumbnail": False,
+                'key': 'EmbedThumbnail',
+                'already_have_thumbnail': False,
             },
         ],
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            ),
-            "Accept-Language": "en-US,en;q=0.9",
-        },
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["web_embedded", "mweb", "android"],
-            }
-        },
-        "socket_timeout": 30,
-        "retries": 5,
-        "no_warnings": False,
+        'socket_timeout': 30,
+        'retries': 5,
+        'no_warnings': False,
     }
+
+    # Load cookies from Streamlit Secrets if configured
+    if "YOUTUBE_COOKIES" in st.secrets and st.secrets["YOUTUBE_COOKIES"].strip():
+        cookie_path = os.path.join(temp_dir, "cookies.txt")
+        with open(cookie_path, "w", encoding="utf-8") as cf:
+            cf.write(st.secrets["YOUTUBE_COOKIES"].strip())
+        ydl_opts['cookiefile'] = cookie_path
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(clean_url, download=True)
-        title = info.get("title", "audio")
+        title = info.get('title', 'audio')
 
     mp3_files = glob.glob(os.path.join(temp_dir, "*.mp3"))
     if not mp3_files:
